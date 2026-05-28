@@ -13,6 +13,7 @@ Scope:
 - changed Git pre-commit installation to preserve and chain existing hooks
 - redacted journal host and CWD metadata by default
 - added regression tests for the repaired behaviors
+- added a Chinese README and linked it from the root README
 
 Verification:
 
