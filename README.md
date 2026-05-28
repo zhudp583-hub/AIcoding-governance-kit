@@ -141,3 +141,5 @@ private deployment scripts.
 
 This is an early toolkit extracted from a real AI-assisted operations workflow.
 Audit the defaults before enabling `enforce` mode on important repositories.
+
+This project is 100% written by Codex.

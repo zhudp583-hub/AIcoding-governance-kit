@@ -15,6 +15,7 @@ Scope:
 - added regression tests for the repaired behaviors
 - added a Chinese README and linked it from the root README
 - aligned the Chinese README project name with `AIcoding Governance Kit`
+- added Codex authorship notes to the English and Chinese READMEs
 
 Verification:
 
