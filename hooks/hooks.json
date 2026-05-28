@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/agent-governance-kit/hooks/agent_governance_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Loading agent governance context"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/agent-governance-kit/hooks/agent_governance_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking closeout context"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/agent-governance-kit/hooks/agent_governance_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking protected actions"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/agent-governance-kit/hooks/agent_governance_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Recording material action"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/agent-governance-kit/hooks/agent_governance_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "Checking closeout"
+          }
+        ]
+      }
+    ]
+  }
+}

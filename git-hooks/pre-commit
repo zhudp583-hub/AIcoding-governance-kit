@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+hook_self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+if command -v git >/dev/null 2>&1; then
+  repo="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+else
+  repo="$(pwd)"
+fi
+
+script="$repo/git-hooks/agk_pre_commit.py"
+if [ ! -x "$script" ]; then
+  script="$hook_self_dir/agk_pre_commit.py"
+fi
+if [ ! -x "$script" ]; then
+  script="$HOME/.codex/agent-governance-kit/git-hooks/agk_pre_commit.py"
+fi
+
+exec python3 "$script" --repo "$repo"
