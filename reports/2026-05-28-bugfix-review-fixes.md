@@ -16,6 +16,7 @@ Scope:
 - added a Chinese README and linked it from the root README
 - aligned the Chinese README project name with `AIcoding Governance Kit`
 - added Codex authorship notes to the English and Chinese READMEs
+- added the human-written project preface to the English and Chinese READMEs
 
 Verification:
 

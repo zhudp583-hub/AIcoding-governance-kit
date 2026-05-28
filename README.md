@@ -2,6 +2,25 @@
 
 [中文说明](README.zh-CN.md)
 
+This is for AI coders who do not come from a coding background. A simple test:
+if you already know what it means to "Git-ify" your code, you probably do not
+need this. If you do not, then you are who I had in mind. I was that person.
+
+When a project gets complicated enough, an agent can suddenly grab code from
+twenty versions ago and start using it. Things do not behave the way you expect,
+so you keep iterating. I once spent a whole week doing that, only to realize I
+was just going in circles. The bugs I was chasing had already been fixed three
+months earlier, and I already had a much cleaner solution.
+
+This tool is what helped me get out of that loop. It helps you leave a journal
+before and after every important change, keep the main line of your code
+separate from side branches, and avoid running the wrong version, committing the
+wrong files, or losing the thread halfway through an idea.
+
+So I am sharing it in the hope that it helps you too. Wishing you all the best.
+
+*Everything above is the only part of this project written by a human.*
+
 Agent Governance Kit is a lightweight governance layer for AI coding agents.
 It combines Codex lifecycle hooks, Git pre-commit checks, work journals, and
 closeout checks so agent-driven projects do not lose their operational memory as
