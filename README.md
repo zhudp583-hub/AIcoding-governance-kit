@@ -1,4 +1,4 @@
-# Agent Governance Kit
+# AIcoding Governance Kit
 
 Agent Governance Kit is a lightweight governance layer for AI coding agents.
 It combines Codex lifecycle hooks, Git pre-commit checks, work journals, and
