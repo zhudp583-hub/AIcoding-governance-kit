@@ -8,13 +8,40 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 
-PROTECTED_PATH_RE = re.compile(
-    r"(^|/)(\.env($|[./])|\.ssh/|auth\.json$|models/|data/|logs/|tmp/|exports/|research_eval/)"
-    r"|(\.pt|\.pkl|\.bin|\.npz|\.parquet|\.dump|\.sqlite|\.db|\.log|\.csv\.gz|\.jsonl\.gz)$",
-    re.IGNORECASE,
+PROTECTED_PATH_MARKERS = tuple(
+    item
+    for item in os.environ.get(
+        "AGK_PROTECTED_PATHS",
+        ".env:.ssh/:auth.json:models/:data/:logs/:tmp/:exports/:research_eval/",
+    ).split(":")
+    if item
+)
+PROTECTED_DIR_NAMES = frozenset(
+    marker.strip("/").lower()
+    for marker in PROTECTED_PATH_MARKERS
+    if marker.endswith("/") and marker.strip("/")
+)
+PROTECTED_FILE_NAMES = frozenset(
+    marker.lower()
+    for marker in PROTECTED_PATH_MARKERS
+    if marker and not marker.endswith("/") and "/" not in marker and marker != ".env"
+)
+PROTECTED_SUFFIXES = (
+    ".pt",
+    ".pkl",
+    ".bin",
+    ".npz",
+    ".parquet",
+    ".dump",
+    ".sqlite",
+    ".db",
+    ".log",
+    ".csv.gz",
+    ".jsonl.gz",
 )
 
 JOURNAL_OR_MANIFEST_RE = re.compile(
@@ -33,6 +60,8 @@ SECRET_PATTERNS = [
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"), "OpenAI-style API key"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key"),
     (re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]{12,}['\"]"), "secret assignment"),
+    (re.compile(r"(?i)(api[_-]?key|secret|token|password)=([^&\s'\"]{12,})"), "secret URL parameter"),
+    (re.compile(r"os\.getenv\([^,\n]+,\s*['\"][^'\"]{12,}['\"]\)"), "hard-coded environment fallback"),
 ]
 
 
@@ -48,16 +77,20 @@ def staged_files(repo: str) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def staged_text(repo: str, path: str, max_bytes: int = 2_000_000) -> str | None:
-    result = run(["git", "show", f":{path}"], repo)
+def staged_blob(repo: str, path: str) -> bytes | None:
+    result = subprocess.run(["git", "show", f":{path}"], cwd=repo, capture_output=True)
     if result.returncode != 0:
         return None
-    data = result.stdout
-    if len(data.encode("utf-8", errors="ignore")) > max_bytes:
+    return result.stdout
+
+
+def staged_text(repo: str, path: str, max_bytes: int = 10_000_000) -> str | None:
+    data = staged_blob(repo, path)
+    if data is None or len(data) > max_bytes:
         return None
-    if "\x00" in data:
+    if b"\x00" in data:
         return None
-    return data
+    return data.decode("utf-8", errors="replace")
 
 
 def file_size(repo: str, path: str) -> int:
@@ -68,8 +101,42 @@ def file_size(repo: str, path: str) -> int:
         return 0
 
 
-def is_allowed_protected(path: str) -> bool:
-    return path.startswith("reports/") or path.startswith("worklog/") or path.startswith("docs/")
+def normalized_path_parts(path: str) -> tuple[list[str], str]:
+    normalized = path.replace("\\", "/").strip()
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    basename = parts[-1].lower() if parts else ""
+    return [part.lower() for part in parts], basename
+
+
+def protected_path(path: str) -> bool:
+    parts, basename = normalized_path_parts(path)
+    if not basename:
+        return False
+    if basename == ".env" or basename.startswith(".env."):
+        return True
+    if basename in PROTECTED_FILE_NAMES:
+        return True
+    if any(part in PROTECTED_DIR_NAMES for part in parts):
+        return True
+    return basename.endswith(PROTECTED_SUFFIXES)
+
+
+def should_skip_secret_line(stripped: str, line: str) -> bool:
+    if not stripped or stripped.startswith("#"):
+        return True
+    placeholders = ("${", '"$', "'$")
+    return any(item in line for item in placeholders)
+
+
+def secret_findings(path: str, text: str) -> Iterable[str]:
+    for line_no, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if should_skip_secret_line(stripped, line):
+            continue
+        for pattern, label in SECRET_PATTERNS:
+            if pattern.search(line):
+                yield f"possible {label} in staged file: {path}:{line_no}"
+                break
 
 
 def smoke_script(repo: str) -> str | None:
@@ -101,35 +168,15 @@ def main() -> int:
     has_material = any(MATERIAL_PATH_RE.search(path) for path in files)
 
     for path in files:
-        if PROTECTED_PATH_RE.search(path) and not is_allowed_protected(path):
+        if protected_path(path):
             problems.append(f"protected artifact path staged: {path}")
         size = file_size(repo, path)
-        if size > 10 * 1024 * 1024 and not path.startswith("reports/"):
+        if size > 10 * 1024 * 1024:
             problems.append(f"large file staged ({size} bytes): {path}")
         text = staged_text(repo, path)
         if text is None:
             continue
-        for line_no, line in enumerate(text.splitlines(), 1):
-            stripped = line.strip()
-            if (
-                not stripped
-                or stripped.startswith("#")
-                or "os.environ" in line
-                or "os.getenv" in line
-                or '"$' in line
-                or "'$" in line
-                or "${" in line
-                or "http://" in line
-                or "https://" in line
-            ):
-                continue
-            for pattern, label in SECRET_PATTERNS:
-                if pattern.search(line):
-                    problems.append(f"possible {label} in staged file: {path}:{line_no}")
-                    break
-            else:
-                continue
-            break
+        problems.extend(secret_findings(path, text))
 
     if has_material and not has_journal:
         problems.append("material code/config/hook change is staged without a journal, report, or manifest file")

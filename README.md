@@ -58,11 +58,19 @@ Install Codex hooks:
 ./scripts/install_codex_hooks.sh
 ```
 
+The installer merges Agent Governance Kit hook groups into an existing
+`hooks.json` instead of replacing unrelated hooks. Set `CODEX_HOME` to choose
+the Codex config directory, or `AGK_INSTALL_ROOT` to choose where this kit is
+installed.
+
 Install the Git pre-commit guard in a repository:
 
 ```bash
 ./scripts/install_git_hooks.sh /path/to/your/repo
 ```
+
+If the repository already has a `pre-commit` hook, the installer keeps it as
+`pre-commit.bak-agk` and the AGK wrapper chains to it after AGK checks pass.
 
 Run a closeout check:
 
@@ -86,6 +94,7 @@ See `examples/config.example.env` for the full list.
 Common variables:
 
 - `AGK_STATE_DIR`: where hook state is stored.
+- `AGK_INSTALL_ROOT`: where the installed hook implementation lives.
 - `AGK_HOOK_MODE`: `enforce` or `warn`.
 - `AGK_JOURNAL_DIRS`: colon-separated journal or manifest directories.
 - `AGK_PROTECTED_PATHS`: colon-separated path markers that should not be
@@ -95,6 +104,8 @@ Common variables:
 - `AGK_RESEARCH_GRACE_PREFIXES`: optional dirty-path prefixes allowed under
   those roots.
 - `AGK_RESEARCH_DIRTY_GRACE_HOURS`: grace period for those research paths.
+- `AGK_JOURNAL_INCLUDE_LOCAL`: set to `1` to include hostnames and absolute
+  CWDs in journal entries. The default redacts local machine metadata.
 
 ## Safety Model
 

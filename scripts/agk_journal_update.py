@@ -32,6 +32,7 @@ def main() -> int:
     parser.add_argument("--journal")
     parser.add_argument("--item", action="append", required=True)
     parser.add_argument("--cwd", default=os.getcwd())
+    parser.add_argument("--include-local-metadata", action="store_true")
     args = parser.parse_args()
 
     path = Path(args.journal).expanduser() if args.journal else default_journal(args.domain, args.cwd)
@@ -40,12 +41,15 @@ def main() -> int:
     root = git_value(["rev-parse", "--show-toplevel"], args.cwd)
     branch = git_value(["branch", "--show-current"], args.cwd)
     head = git_value(["rev-parse", "--short", "HEAD"], args.cwd)
+    include_local = args.include_local_metadata or os.environ.get("AGK_JOURNAL_INCLUDE_LOCAL") == "1"
+    host = socket.gethostname() if include_local else "redacted"
+    cwd = args.cwd if include_local else "redacted"
 
     lines = [
         f"\n## {ts} - Agent Closeout",
         "",
-        f"- Host: `{socket.gethostname()}`",
-        f"- CWD: `{args.cwd}`",
+        f"- Host: `{host}`",
+        f"- CWD: `{cwd}`",
         f"- Domain: `{args.domain}`",
         f"- Git root: `{root}`",
         f"- Branch: `{branch}`",

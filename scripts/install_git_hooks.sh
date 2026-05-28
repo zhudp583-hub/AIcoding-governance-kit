@@ -9,7 +9,9 @@ mkdir -p "$hook_dir"
 src_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 source_hook="${AGK_PRE_COMMIT_TEMPLATE:-$src_root/git-hooks/pre-commit}"
 
-if [ -f "$hook_dir/pre-commit" ] && [ ! -f "$hook_dir/pre-commit.bak-agk" ]; then
+if [ -f "$hook_dir/pre-commit" ] \
+  && [ ! -f "$hook_dir/pre-commit.bak-agk" ] \
+  && ! grep -q 'Agent Governance Kit' "$hook_dir/pre-commit" 2>/dev/null; then
   cp "$hook_dir/pre-commit" "$hook_dir/pre-commit.bak-agk"
 fi
 

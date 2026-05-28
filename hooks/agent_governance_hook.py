@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -52,13 +53,6 @@ MATERIAL_COMMAND_PATTERNS = [
     r"\b(psql|pg_dump|VACUUM|DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b",
 ]
 
-BLOCKED_COMMAND_PATTERNS = [
-    (r"rm\s+-rf\s+/(?:\s|$)", "Refusing rm -rf /"),
-    (r"git\s+reset\s+--hard", "git reset --hard requires explicit human-run approval"),
-    (r"git\s+checkout\s+--\s+", "git checkout -- can discard user work"),
-    (r"docker\s+system\s+prune\s+.*\s-a\b", "docker system prune -a is too broad for an agent hook"),
-]
-
 PROTECTED_ARTIFACT_SUFFIXES = (
     ".pt",
     ".pkl",
@@ -72,6 +66,20 @@ PROTECTED_ARTIFACT_SUFFIXES = (
     ".jsonl.gz",
     ".log",
 )
+
+PROTECTED_DIR_NAMES = frozenset(
+    marker.strip("/").lower()
+    for marker in PROTECTED_PATH_MARKERS
+    if marker.endswith("/") and marker.strip("/")
+)
+PROTECTED_FILE_NAMES = frozenset(
+    marker.lower()
+    for marker in PROTECTED_PATH_MARKERS
+    if marker and not marker.endswith("/") and "/" not in marker and marker != ".env"
+)
+
+SHELL_SEPARATORS_RE = re.compile(r"(?:&&|\|\||;|\n)")
+REDIRECT_RE = re.compile(r"(?:^|[\s;&|])(?:[0-9]?>|[0-9]?>>|&>)\s*(['\"]?)([^'\"\s;&|]+)\1")
 
 
 def run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -243,22 +251,132 @@ def is_material_command(command: str) -> bool:
     return any(re.search(pattern, command, re.IGNORECASE) for pattern in MATERIAL_COMMAND_PATTERNS)
 
 
+def command_segments(command: str) -> list[list[str]]:
+    segments: list[list[str]] = []
+    for chunk in SHELL_SEPARATORS_RE.split(command):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            words = shlex.split(chunk, posix=True)
+        except ValueError:
+            continue
+        if words:
+            segments.append(words)
+    return segments
+
+
+def command_name_and_args(words: list[str]) -> tuple[str, list[str]]:
+    index = 0
+    while index < len(words) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[index]):
+        index += 1
+    while index < len(words) and words[index] in {"sudo", "command"}:
+        index += 1
+    if index < len(words) and words[index] == "env":
+        index += 1
+        while index < len(words):
+            word = words[index]
+            if word == "--":
+                index += 1
+                break
+            if word.startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
+                index += 1
+                continue
+            break
+    if index >= len(words):
+        return "", []
+    return words[index], words[index + 1 :]
+
+
+def rm_recursive_force_root(args: list[str]) -> bool:
+    recursive = False
+    force = False
+    targets: list[str] = []
+    after_options = False
+    for arg in args:
+        if not after_options and arg == "--":
+            after_options = True
+            continue
+        if not after_options and arg.startswith("-") and arg != "-":
+            opts = arg.lstrip("-")
+            recursive = recursive or "r" in opts or "R" in opts or arg == "--recursive"
+            force = force or "f" in opts or arg == "--force"
+            continue
+        targets.append(arg)
+    return recursive and force and any(target == "/" or target.startswith("/*") for target in targets)
+
+
+def docker_prune_all(args: list[str]) -> bool:
+    if len(args) < 2 or args[0] != "system" or args[1] != "prune":
+        return False
+    for arg in args[2:]:
+        if arg in {"-a", "--all"}:
+            return True
+        if arg.startswith("-") and not arg.startswith("--") and "a" in arg.lstrip("-"):
+            return True
+    return False
+
+
 def block_reason(command: str) -> str | None:
-    if "AGK_ALLOW_PROTECTED=1" in command or "AGK_APPROVED=1" in command:
+    if os.environ.get("AGK_APPROVED") == "1":
         return None
-    for pattern, reason in BLOCKED_COMMAND_PATTERNS:
-        if re.search(pattern, command, re.IGNORECASE):
-            return reason
+    for words in command_segments(command):
+        executable, args = command_name_and_args(words)
+        executable = Path(executable).name
+        if executable == "rm" and rm_recursive_force_root(args):
+            return "Refusing recursive force remove of filesystem root"
+        if executable == "git" and args[:1] == ["reset"] and "--hard" in args:
+            return "git reset --hard requires explicit human-run approval"
+        if executable == "git" and args[:1] == ["checkout"] and "--" in args:
+            return "git checkout -- can discard user work"
+        if executable == "docker" and docker_prune_all(args):
+            return "docker system prune --all is too broad for an agent hook"
     return None
 
 
+def normalized_path_parts(path: str) -> tuple[list[str], str]:
+    normalized = path.replace("\\", "/").strip()
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    basename = parts[-1].lower() if parts else ""
+    return [part.lower() for part in parts], basename
+
+
 def protected_path(path: str) -> bool:
-    lowered = path.lower()
-    return any(marker.lower() in lowered for marker in PROTECTED_PATH_MARKERS) or lowered.endswith(PROTECTED_ARTIFACT_SUFFIXES)
+    parts, basename = normalized_path_parts(path)
+    if not basename:
+        return False
+    if basename == ".env" or basename.startswith(".env."):
+        return True
+    if basename in PROTECTED_FILE_NAMES:
+        return True
+    if any(part in PROTECTED_DIR_NAMES for part in parts):
+        return True
+    return basename.endswith(PROTECTED_ARTIFACT_SUFFIXES)
+
+
+def bash_touches_protected(command: str) -> str | None:
+    if os.environ.get("AGK_ALLOW_PROTECTED") == "1":
+        return None
+    for match in REDIRECT_RE.finditer(command):
+        path = match.group(2)
+        if protected_path(path):
+            return f"shell redirection touches protected artifact path: {path}"
+    for words in command_segments(command):
+        executable, args = command_name_and_args(words)
+        executable = Path(executable).name
+        if executable in {"tee", "touch", "mkdir", "cp", "mv", "rm", "sed", "perl"}:
+            for arg in args:
+                if arg.startswith("-"):
+                    continue
+                if protected_path(arg):
+                    return f"shell command touches protected artifact path: {arg}"
+    return None
 
 
 def patch_touches_protected(event: dict[str, Any]) -> str | None:
     if event.get("tool_name") != "apply_patch":
+        return None
+    if os.environ.get("AGK_ALLOW_PROTECTED") == "1":
         return None
     text = command_text(event)
     for line in text.splitlines():
@@ -374,6 +492,8 @@ def main() -> int:
     if hook_event == "PreToolUse":
         command = command_text(event)
         reason = block_reason(command) or patch_touches_protected(event)
+        if not reason and event.get("tool_name") == "Bash":
+            reason = bash_touches_protected(command)
         if reason:
             block_pretool(reason)
             return 0

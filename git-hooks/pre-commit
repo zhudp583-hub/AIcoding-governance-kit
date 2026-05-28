@@ -1,4 +1,5 @@
 #!/bin/sh
+# Agent Governance Kit pre-commit wrapper.
 set -eu
 
 hook_self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -17,4 +18,15 @@ if [ ! -x "$script" ]; then
   script="$HOME/.codex/agent-governance-kit/git-hooks/agk_pre_commit.py"
 fi
 
-exec python3 "$script" --repo "$repo"
+python3 "$script" --repo "$repo"
+status=$?
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+
+chained_hook="$hook_self_dir/pre-commit.bak-agk"
+if [ -x "$chained_hook" ]; then
+  "$chained_hook"
+fi
+
+exit 0
