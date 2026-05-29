@@ -17,6 +17,8 @@ bug 我三个月前就修完了，并且已经有一个很完美的方案。
 
 *以上是本项目中唯一由人类书写的部分。*
 
+##
+
 AIcoding Governance Kit 是一个面向 AI 编码 agent 的轻量级治理层。它把
 Codex 生命周期 hooks、Git pre-commit 检查、工作日志和收口检查组合起来，
 避免 agent 驱动的项目在增长过程中丢失操作记忆。
