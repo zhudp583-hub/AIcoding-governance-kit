@@ -21,6 +21,8 @@ So I am sharing it in the hope that it helps you too. Wishing you all the best.
 
 *Everything above is the only part of this project written by a human.*
 
+##
+
 Agent Governance Kit is a lightweight governance layer for AI coding agents.
 It combines Codex lifecycle hooks, Git pre-commit checks, work journals, and
 closeout checks so agent-driven projects do not lose their operational memory as
