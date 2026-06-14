@@ -61,9 +61,9 @@ Before final response:
 3. Run relevant checks, or name skipped checks and why.
 4. Keep large data, logs, models, dumps, and CSVs out of Git.
 5. Commit code/docs when appropriate, or explain residual dirty state.
-6. For red-zone work, commit or record a manifest with path, size, file or row count,
-   checksum, source machine, target machine, and whether external sync is
-   required.
+6. For red-zone work, commit or record a manifest that includes the session
+   marker shown by the hook, plus path, size, file or row count, checksum,
+   source machine, target machine, and whether external sync is required.
 
 Use bundled scripts when possible:
 
@@ -94,7 +94,8 @@ backup path.
 
 ## Stop Hook Interaction
 
-The Agent Governance Kit Stop hook should block only for missing red-zone
-evidence or protected artifacts. It should not block ordinary code work merely
-because no journal was written. If the hook continues the turn, complete the
-needed commit/manifest or protected-artifact cleanup, then answer.
+The Agent Governance Kit Stop hook blocks for missing red-zone evidence or
+protected artifacts. Material but non-red-zone work defaults to warning mode
+unless `AGK_MATERIAL_CLOSEOUT_MODE=enforce` is set. If the hook continues the
+turn, complete the needed commit/manifest or protected-artifact cleanup, then
+answer.

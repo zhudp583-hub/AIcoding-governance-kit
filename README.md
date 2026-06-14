@@ -112,6 +112,8 @@ The kit has four layers:
 
 - `hooks/hooks.json`: Codex hook registration for session, prompt, tool, and
   stop events.
+- `agk_common.py`: shared protected-path matching used by the hook,
+  pre-commit guard, and closeout checker.
 - `hooks/agent_governance_hook.py`: lifecycle hook implementation.
 - `git-hooks/pre-commit`: portable pre-commit wrapper.
 - `git-hooks/agk_pre_commit.py`: staged-file guard for journals, secrets, and
@@ -171,7 +173,9 @@ Append a journal entry:
 python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment config and verified service health"
 ```
 
-Available journal domains are `ops`, `infra`, `prod`, and `research`.
+Available journal domains are `ops`, `infra`, `prod`, and `research`. The
+journal helper embeds an `AGK-Session` marker from `AGK_SESSION_ID` or the most
+recent AGK state file; pass `--session-id` to override it.
 
 ## Configuration
 
@@ -195,7 +199,10 @@ Common variables:
 - `AGK_RESEARCH_DIRTY_GRACE_HOURS`: grace period for those research paths.
 - `AGK_PRE_COMMIT_WARN_ONLY`: set to `1` to warn instead of blocking at
   pre-commit time.
+- `AGK_MATERIAL_CLOSEOUT_MODE`: `off`, `warn`, or `enforce` for material but
+  non-red-zone work. The default is `warn`.
 - `AGK_DEFAULT_JOURNAL`: optional default journal path for the journal helper.
+- `AGK_SESSION_ID`: optional session marker override for journal helper output.
 - `AGK_JOURNAL_INCLUDE_LOCAL`: set to `1` to include hostnames and absolute
   CWDs in journal entries. The default redacts local machine metadata.
 
@@ -207,6 +214,15 @@ the work. Use manifests for high-impact work: non-scratch deletions, service or
 cron changes, database writes, cross-machine sync, protected artifacts, models,
 backups, deployment evidence, and other runtime changes that Git alone cannot
 fully describe.
+
+For red-zone work, the Stop hook accepts either a post-session Git commit or a
+journal/manifest file containing the current session marker, for example
+`AGK-Session: <session-id>`. A file touched after session start is not enough by
+itself.
+
+For material but non-red-zone work, the default is warning mode. Set
+`AGK_MATERIAL_CLOSEOUT_MODE=enforce` if you want every material session to end
+with a commit or session-marked journal/manifest.
 
 The skill uses this zone model:
 

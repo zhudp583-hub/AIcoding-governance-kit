@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,7 @@ def load_module(name: str, relative_path: str):
 
 hook = load_module("agent_governance_hook", "hooks/agent_governance_hook.py")
 pre_commit = load_module("agk_pre_commit", "git-hooks/agk_pre_commit.py")
+journal_update = load_module("agk_journal_update", "scripts/agk_journal_update.py")
 
 
 def run(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -103,6 +105,49 @@ class HookGuardTests(unittest.TestCase):
         self.assertFalse(hook.is_red_zone_command("rm scratch/session/tmp.txt"))
         self.assertTrue(hook.is_red_zone_command("systemctl restart app.service"))
         self.assertTrue(hook.is_red_zone_command("rsync -a data/ host:/backup/"))
+
+    def test_closeout_evidence_requires_session_marker_for_journal_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "docs").mkdir()
+            started_at = time.time() - 1
+            (repo / "docs/notes.md").write_text("touched after start\n", encoding="utf-8")
+
+            ok, reason = hook.has_closeout_evidence(str(repo), started_at, "session-123")
+            self.assertFalse(ok)
+            self.assertIn("AGK-Session: session-123", reason)
+
+            (repo / "docs/notes.md").write_text(
+                "red-zone closeout\nAGK-Session: session-123\n",
+                encoding="utf-8",
+            )
+            ok, reason = hook.has_closeout_evidence(str(repo), started_at, "session-123")
+            self.assertTrue(ok, reason)
+
+    def test_material_closeout_mode_defaults_to_warn_and_rejects_invalid_values(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGK_MATERIAL_CLOSEOUT_MODE", None)
+            self.assertEqual(hook.material_closeout_mode(), "warn")
+        with patch.dict(os.environ, {"AGK_MATERIAL_CLOSEOUT_MODE": "enforce"}):
+            self.assertEqual(hook.material_closeout_mode(), "enforce")
+        with patch.dict(os.environ, {"AGK_MATERIAL_CLOSEOUT_MODE": "invalid"}):
+            self.assertEqual(hook.material_closeout_mode(), "warn")
+
+    def test_journal_helper_embeds_session_marker(self) -> None:
+        self.assertEqual(journal_update.closeout_marker("session-123"), "AGK-Session: session-123")
+
+    def test_journal_helper_discovers_latest_session_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            older = state_dir / "older.json"
+            newer = state_dir / "newer.json"
+            older.write_text(json.dumps({"session_id": "old-session"}), encoding="utf-8")
+            newer.write_text(json.dumps({"session_id": "new-session"}), encoding="utf-8")
+            os.utime(older, (time.time() - 20, time.time() - 20))
+
+            with patch.dict(os.environ, {"AGK_STATE_DIR": str(state_dir)}, clear=False):
+                os.environ.pop("AGK_SESSION_ID", None)
+                self.assertEqual(journal_update.discover_session_id(), "new-session")
 
 
 class GitHookTests(unittest.TestCase):
@@ -186,6 +231,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("echo keep", stop_commands)
             self.assertEqual(len(agk_commands), 1)
             self.assertIn(str(install_root), agk_commands[0])
+            self.assertTrue((install_root / "agk_common.py").exists())
 
     def test_git_installer_chains_existing_pre_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,6 +245,7 @@ class InstallerTests(unittest.TestCase):
 
             install = run(["sh", str(ROOT / "scripts/install_git_hooks.sh"), str(repo)], ROOT)
             self.assertEqual(install.returncode, 0, install.stderr)
+            self.assertTrue((hooks_dir / "agk_common.py").exists())
 
             result = run([str(hooks_dir / "pre-commit")], repo)
             self.assertEqual(result.returncode, 0, result.stderr)

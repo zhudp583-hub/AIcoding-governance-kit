@@ -13,6 +13,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from agk_common import protected_path
+
 
 STATE_ROOT = Path(os.environ.get("AGK_STATE_DIR", "~/.codex/agent-governance-kit/state")).expanduser()
 EVENT_LOG = STATE_ROOT.parent / "events.jsonl"
@@ -35,14 +40,6 @@ JOURNAL_DIRS = tuple(
     ).split(":")
     if item
 )
-PROTECTED_PATH_MARKERS = tuple(
-    item
-    for item in os.environ.get(
-        "AGK_PROTECTED_PATHS",
-        ".env:.ssh/:auth.json:models/:data/:logs/:tmp/:exports/:research_eval/",
-    ).split(":")
-    if item
-)
 
 MATERIAL_COMMAND_PATTERNS = [
     r"\b(apply_patch|cat\s+>|tee\s+|sed\s+-i|perl\s+-pi)\b",
@@ -60,31 +57,6 @@ RED_ZONE_COMMAND_PATTERNS = [
     r"\b(rsync|scp)\b",
     r"\b(psql|pg_dump|VACUUM|DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b",
 ]
-
-PROTECTED_ARTIFACT_SUFFIXES = (
-    ".pt",
-    ".pkl",
-    ".bin",
-    ".npz",
-    ".parquet",
-    ".sqlite",
-    ".db",
-    ".dump",
-    ".csv.gz",
-    ".jsonl.gz",
-    ".log",
-)
-
-PROTECTED_DIR_NAMES = frozenset(
-    marker.strip("/").lower()
-    for marker in PROTECTED_PATH_MARKERS
-    if marker.endswith("/") and marker.strip("/")
-)
-PROTECTED_FILE_NAMES = frozenset(
-    marker.lower()
-    for marker in PROTECTED_PATH_MARKERS
-    if marker and not marker.endswith("/") and "/" not in marker and marker != ".env"
-)
 
 SHELL_SEPARATORS_RE = re.compile(r"(?:&&|\|\||;|\n)")
 REDIRECT_RE = re.compile(r"(?:^|[\s;&|])(?:[0-9]?>|[0-9]?>>|&>)\s*(['\"]?)([^'\"\s;&|]+)\1")
@@ -224,10 +196,24 @@ def journal_dirs(cwd: str, root: str | None) -> list[Path]:
     return out
 
 
-def mtime_after(path: Path, threshold: float) -> bool:
+def closeout_marker(session_id: str) -> str:
+    return f"AGK-Session: {session_id or 'unknown'}"
+
+
+def file_contains_marker(path: Path, marker: str, max_bytes: int = 2_000_000) -> bool:
+    try:
+        if path.stat().st_size > max_bytes:
+            return False
+        return marker in path.read_text(encoding="utf-8", errors="replace")
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
+
+
+def mtime_after(path: Path, threshold: float, session_id: str) -> bool:
+    marker = closeout_marker(session_id)
     try:
         if path.is_file():
-            return path.stat().st_mtime >= threshold
+            return path.stat().st_mtime >= threshold and file_contains_marker(path, marker)
     except PermissionError:
         return False
     try:
@@ -237,21 +223,26 @@ def mtime_after(path: Path, threshold: float) -> bool:
     for child in children:
         if child.is_file() and child.suffix.lower() in {".md", ".json", ".jsonl", ".yaml", ".yml", ".toml"}:
             try:
-                if child.stat().st_mtime >= threshold:
+                if child.stat().st_mtime >= threshold and file_contains_marker(child, marker):
                     return True
             except (FileNotFoundError, PermissionError):
                 continue
     return False
 
 
-def has_closeout_evidence(cwd: str, started_at: float) -> tuple[bool, str]:
+def has_closeout_evidence(cwd: str, started_at: float, session_id: str) -> tuple[bool, str]:
     root = git_root(cwd)
     if root and git_last_commit_ts(root) >= started_at:
         return True, f"git commit after session start in {root}"
     for directory in journal_dirs(cwd, root):
-        if mtime_after(directory, started_at):
-            return True, f"journal/manifest updated under {directory}"
-    return False, "no post-session journal, manifest, or commit evidence found"
+        if mtime_after(directory, started_at, session_id):
+            return True, f"journal/manifest with {closeout_marker(session_id)} updated under {directory}"
+    return False, f"no post-session commit or journal/manifest containing {closeout_marker(session_id)} found"
+
+
+def material_closeout_mode() -> str:
+    mode = os.environ.get("AGK_MATERIAL_CLOSEOUT_MODE", "warn").lower()
+    return mode if mode in {"off", "warn", "enforce"} else "warn"
 
 
 def command_text(event: dict[str, Any]) -> str:
@@ -386,26 +377,6 @@ def block_reason(command: str) -> str | None:
     return None
 
 
-def normalized_path_parts(path: str) -> tuple[list[str], str]:
-    normalized = path.replace("\\", "/").strip()
-    parts = [part for part in normalized.split("/") if part not in {"", "."}]
-    basename = parts[-1].lower() if parts else ""
-    return [part.lower() for part in parts], basename
-
-
-def protected_path(path: str) -> bool:
-    parts, basename = normalized_path_parts(path)
-    if not basename:
-        return False
-    if basename == ".env" or basename.startswith(".env."):
-        return True
-    if basename in PROTECTED_FILE_NAMES:
-        return True
-    if any(part in PROTECTED_DIR_NAMES for part in parts):
-        return True
-    return basename.endswith(PROTECTED_ARTIFACT_SUFFIXES)
-
-
 def protected_dirty_paths(paths: list[str]) -> list[str]:
     return [path for path in paths if protected_path(path)]
 
@@ -474,6 +445,10 @@ def stop_continue(reason: str) -> None:
     json_out({"decision": "block", "reason": reason})
 
 
+def stop_warn(reason: str) -> None:
+    json_out({"continue": True, "systemMessage": f"Agent Governance Kit closeout warning: {reason}"})
+
+
 def self_test() -> int:
     sample = {
         "session_id": "self-test",
@@ -522,6 +497,7 @@ def main() -> int:
                 "git_head_start": git_head(root) if root else None,
                 "material": False,
                 "red_zone": False,
+                "closeout_marker": closeout_marker(session_id),
             }
         )
         save_state(state)
@@ -531,7 +507,8 @@ def main() -> int:
                     "hookEventName": "SessionStart",
                     "additionalContext": (
                         "Agent Governance Kit is active. Use Git status/diff for ordinary "
-                        "work; commit or write a manifest for high-impact operations."
+                        "work; commit or write a manifest for high-impact operations. "
+                        f"Manifest evidence for this session must include {closeout_marker(session_id)}."
                     ),
                 }
             }
@@ -547,7 +524,8 @@ def main() -> int:
                         "hookEventName": "UserPromptSubmit",
                         "additionalContext": (
                             "If this turn changes services, data, deployment state, or protected "
-                            "artifacts, close with a commit or manifest before final."
+                            "artifacts, close with a commit or manifest before final. "
+                            f"Manifest evidence marker: {closeout_marker(session_id)}."
                         ),
                     }
                 }
@@ -596,18 +574,35 @@ def main() -> int:
         if not state.get("material") and not state.get("red_zone"):
             json_out({"continue": True})
             return 0
-        if not state.get("red_zone"):
+        if state.get("red_zone"):
+            evidence_ok, evidence = has_closeout_evidence(cwd, started_at, session_id)
+            if evidence_ok:
+                json_out({"continue": True})
+                return 0
+            stop_continue(
+                "High-impact agent work was detected but closeout is incomplete: "
+                + evidence
+                + ". Commit the change or update a manifest before final response."
+            )
+            return 0
+        mode = material_closeout_mode()
+        if mode == "off":
             json_out({"continue": True})
             return 0
-        evidence_ok, evidence = has_closeout_evidence(cwd, started_at)
+        evidence_ok, evidence = has_closeout_evidence(cwd, started_at, session_id)
         if evidence_ok:
             json_out({"continue": True})
             return 0
-        stop_continue(
-            "High-impact agent work was detected but closeout is incomplete: "
+        message = (
+            "Material agent work has no closeout evidence: "
             + evidence
-            + ". Commit the change or update a manifest before final response."
+            + ". Git status/diff may be enough for small work; set AGK_MATERIAL_CLOSEOUT_MODE=enforce "
+            + "to block this case."
         )
+        if mode == "enforce":
+            stop_continue(message)
+            return 0
+        stop_warn(message)
         return 0
 
     return 0

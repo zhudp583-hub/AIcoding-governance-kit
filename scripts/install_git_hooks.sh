@@ -16,6 +16,7 @@ if [ -f "$hook_dir/pre-commit" ] \
 fi
 
 cp "$source_hook" "$hook_dir/pre-commit"
+cp "$src_root/agk_common.py" "$hook_dir/agk_common.py"
 cp "$src_root/git-hooks/agk_pre_commit.py" "$hook_dir/agk_pre_commit.py"
 cp "$src_root/git-hooks/agk_repo_smoke.py" "$hook_dir/agk_repo_smoke.py"
 chmod +x "$hook_dir/pre-commit" "$hook_dir/agk_pre_commit.py" "$hook_dir/agk_repo_smoke.py"

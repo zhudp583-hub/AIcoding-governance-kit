@@ -94,6 +94,8 @@ AIcoding Governance Kit 走的是中间路线：
 ## 仓库内容
 
 - `hooks/hooks.json`：Codex session、prompt、tool 和 stop 事件的 hook 注册。
+- `agk_common.py`：hook、pre-commit 守卫和 closeout checker 共用的 protected
+  path 匹配逻辑。
 - `hooks/agent_governance_hook.py`：生命周期 hook 实现。
 - `git-hooks/pre-commit`：可移植的 pre-commit wrapper。
 - `git-hooks/agk_pre_commit.py`：针对已暂存文件的日志、秘钥和受保护产物守卫。
@@ -148,7 +150,9 @@ python3 scripts/agk_closeout_check.py --repo /path/to/your/repo --allow-dirty
 python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment config and verified service health"
 ```
 
-可用日志域包括 `ops`、`infra`、`prod` 和 `research`。
+可用日志域包括 `ops`、`infra`、`prod` 和 `research`。journal helper 会从
+`AGK_SESSION_ID` 或最近的 AGK state 文件中写入 `AGK-Session` 标记；也可以用
+`--session-id` 手动覆盖。
 
 ## 配置
 
@@ -168,7 +172,10 @@ python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment co
 - `AGK_RESEARCH_GRACE_PREFIXES`：上述根目录下允许 dirty 的路径前缀。
 - `AGK_RESEARCH_DIRTY_GRACE_HOURS`：这些研究路径的宽限小时数。
 - `AGK_PRE_COMMIT_WARN_ONLY`：设为 `1` 时，pre-commit 只警告不阻断。
+- `AGK_MATERIAL_CLOSEOUT_MODE`：针对 material 但非 red-zone 工作，可设为
+  `off`、`warn` 或 `enforce`。默认是 `warn`。
 - `AGK_DEFAULT_JOURNAL`：日志 helper 使用的可选默认日志路径。
+- `AGK_SESSION_ID`：日志 helper 输出中使用的可选 session 标记覆盖值。
 - `AGK_JOURNAL_INCLUDE_LOCAL`：设为 `1` 时，日志会包含主机名和绝对 CWD。
   默认会脱敏本地机器元数据。
 
@@ -178,6 +185,14 @@ python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment co
 `git diff` 解释清楚，不需要额外写日志。manifest 用于高影响操作：非
 `scratch/` 删除、服务或 cron 变更、数据库写入、跨机器同步、受保护产物、
 模型、备份、部署证据，以及其他 Git 无法完整描述的运行时变更。
+
+对于 red-zone 工作，Stop hook 接受两种证据：session 开始后的 Git commit，
+或者包含当前 session 标记的 journal/manifest，例如 `AGK-Session: <session-id>`。
+仅仅在 session 开始后 touch 过某个文档，不再算作有效收口证据。
+
+对于 material 但非 red-zone 的工作，默认是 warn 模式。如果你希望每一次实质性
+工作都必须用 commit 或带 session 标记的 journal/manifest 收口，可以设置
+`AGK_MATERIAL_CLOSEOUT_MODE=enforce`。
 
 skill 使用的分区模型是：
 

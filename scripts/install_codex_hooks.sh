@@ -6,6 +6,7 @@ codex_home="${CODEX_HOME:-$HOME/.codex}"
 dest_root="${AGK_INSTALL_ROOT:-${AGK_CODEX_HOME:-$codex_home/agent-governance-kit}}"
 
 mkdir -p "$dest_root/hooks" "$dest_root/git-hooks"
+cp "$src_root/agk_common.py" "$dest_root/agk_common.py"
 cp "$src_root/hooks/agent_governance_hook.py" "$dest_root/hooks/agent_governance_hook.py"
 cp "$src_root/git-hooks/pre-commit" "$dest_root/git-hooks/pre-commit"
 cp "$src_root/git-hooks/agk_pre_commit.py" "$dest_root/git-hooks/agk_pre_commit.py"
