@@ -21,117 +21,59 @@ So I am sharing it in the hope that it helps you too. Wishing you all the best.
 
 *Everything above is the only part of this project written by a human.*
 
-##
+## Overview
 
-AIcoding Governance Kit is a small governance toolkit for people building real
-projects with AI coding agents. It adds lightweight checks around Codex, Git,
-project journals, and handoff routines so the agent can move quickly without
-quietly losing the thread of the work.
+AIcoding Governance Kit is a local governance kit for projects built with AI
+coding agents. It gives Codex and Git a small amount of structure so fast agent
+work still leaves a trustworthy trail.
 
-The kit is intentionally local and plain-file based. It does not require a
-server, SaaS account, database, or private infrastructure. Install the hooks,
-keep the scripts in your project, and adapt the rules to your own repository.
+It is not a SaaS product, a security boundary, or a heavy process framework. It
+is a hook + script + skill pack you can keep in a repository, audit, and adapt.
 
-## What It Does
+The design is deliberately balanced:
 
-AIcoding Governance Kit focuses on a practical problem: agent-driven projects
-need memory, boundaries, and evidence.
+- Not docs-only. Notes drift when they are not tied to Git state.
+- Not heavy-by-default. If every edit requires ceremony, the agent starts
+  optimizing for governance instead of the product.
+- Git-first for normal work. Source and docs are usually explained by
+  `git status`, `git diff`, and commits.
+- Stronger evidence for high-impact work. Runtime changes, data writes,
+  protected artifacts, model files, backups, cross-machine sync, and deployment
+  evidence need a commit or session-marked journal/manifest.
 
-It helps you:
+## What You Get
 
-- load governance context when a Codex session starts
-- detect material tool use such as edits, commits, service commands, data
-  commands, and cross-machine sync
-- block a small set of commands that commonly destroy user work
-- keep protected artifacts such as secrets, model files, databases, logs, and
-  exports out of Git
-- record hook events locally for audit and debugging
-- use Git status, diff, and commits as the default evidence for ordinary work
-- require stronger evidence for high-impact operations
-- provide a reusable Codex skill that tells the agent how to close work cleanly
+- **Codex lifecycle hooks**: add context on session start, inspect prompt/tool
+  events, block selected destructive actions, track material work, and enforce
+  closeout only when the work is high-impact.
+- **Git pre-commit guard**: stops protected artifacts, large files, common
+  secret patterns, and material code/config/hook changes without a journal,
+  report, or manifest.
+- **Closeout helpers**: check whether a repo is ready for handoff and write
+  short session-marked journal entries when Git alone is not enough.
+- **Reusable agent skill**: tells the agent how to use `scratch/`, Git evidence,
+  protected artifact rules, and the green/yellow/red closeout model.
 
-It is not a replacement for engineering judgment, CI, backups, branch
-protection, or human review. It is a guardrail for the everyday failure modes
-that appear when a coding agent can change more than the project can explain.
+## Evidence Model
 
-## Design Principle
+AGK uses zones instead of treating every change the same:
 
-The core idea is not "write more documents." Documentation alone can become
-another source of drift: the agent may update notes, forget the actual running
-state, and still leave the project hard to trust.
+- **Green**: read-only work, `scratch/` output, ordinary source/doc edits, and
+  local Git status/diff/add/commit/log. Git is enough.
+- **Yellow**: new files outside `scratch/`, new Markdown outside normal docs
+  slots, and remote-affecting but Git-backed work such as `git push`. These
+  should be visible, but do not block ordinary handoff.
+- **Red**: non-scratch deletion, database writes, runtime/production config,
+  service/cron/systemd/docker changes, cross-machine sync, protected artifacts,
+  models, backups, hook changes, and deployment evidence. These require a
+  post-session commit or a journal/manifest containing `AGK-Session:
+  <session-id>`.
 
-The core idea is also not "make every action heavy." If the rules are too
-strict, the agent starts spending its effort satisfying governance instead of
-building the thing. That creates a different failure mode: the project looks
-well documented, but the work slows down and the agent optimizes for ceremony.
-
-AIcoding Governance Kit is built around a middle path:
-
-- Git is the evidence chain for ordinary source and documentation work.
-- Lightweight hooks catch the dangerous edges before they become expensive.
-- Journals and manifests are reserved for work that Git cannot explain well:
-  runtime changes, cross-machine sync, data writes, backups, models, protected
-  artifacts, and deployment evidence.
-- The agent gets enough structure to stay oriented, but not so much structure
-  that governance becomes the main task.
-
-## How It Works
-
-The kit has four layers:
-
-1. **Codex lifecycle hooks**
-
-   The hook runs on `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
-   `PostToolUse`, and `Stop`. It adds operating context, tracks material work,
-   blocks selected destructive commands, detects protected artifact paths, and
-   asks for closeout evidence only when the work crosses into high-impact
-   territory.
-
-2. **Git pre-commit guard**
-
-   The pre-commit hook checks staged files before they are committed. It blocks
-   protected artifact paths, large files, common secret patterns, and material
-   source/config/hook changes that have no journal, report, or manifest. During
-   adoption it can be switched to warning mode.
-
-3. **Closeout scripts**
-
-   `agk_closeout_check.py` verifies that a repository is ready for handoff and
-   has no protected artifacts dirty or staged. `agk_journal_update.py` appends
-   short, timestamped work notes when a journal or manifest is the right form of
-   evidence.
-
-4. **Agent operating skill**
-
-   `skills/agent-operational-governance/SKILL.md` gives the agent a compact
-   working model: use `scratch/` for temporary output, prefer Git evidence for
-   ordinary work, keep runtime artifacts out of commits, and require a commit or
-   manifest for high-impact operations.
-
-## Repository Contents
-
-- `hooks/hooks.json`: Codex hook registration for session, prompt, tool, and
-  stop events.
-- `agk_common.py`: shared protected-path matching used by the hook,
-  pre-commit guard, and closeout checker.
-- `hooks/agent_governance_hook.py`: lifecycle hook implementation.
-- `git-hooks/pre-commit`: portable pre-commit wrapper.
-- `git-hooks/agk_pre_commit.py`: staged-file guard for journals, secrets, and
-  protected artifacts.
-- `git-hooks/agk_repo_smoke.py`: optional repository-specific smoke-check
-  extension point.
-- `scripts/install_codex_hooks.sh`: installs Codex hook files into
-  `~/.codex/agent-governance-kit`.
-- `scripts/install_git_hooks.sh`: installs the Git pre-commit guard into a
-  repository.
-- `scripts/agk_journal_update.py`: appends closeout notes to a journal.
-- `scripts/agk_closeout_check.py`: checks a repository before handoff.
-- `skills/agent-operational-governance/SKILL.md`: a Codex skill describing the
-  operating discipline.
+Material but non-red work defaults to warning mode. Set
+`AGK_MATERIAL_CLOSEOUT_MODE=enforce` if you want every material session to end
+with evidence.
 
 ## Installation
-
-Clone the repository, then run the installers from the repository root.
 
 Install Codex hooks:
 
@@ -139,10 +81,9 @@ Install Codex hooks:
 ./scripts/install_codex_hooks.sh
 ```
 
-The installer merges AIcoding Governance Kit hook groups into an existing
-`hooks.json` instead of replacing unrelated hooks. Set `CODEX_HOME` to choose
-the Codex config directory, or `AGK_INSTALL_ROOT` to choose where this kit is
-installed.
+The installer merges AGK hook groups into an existing `hooks.json` instead of
+replacing unrelated hooks. Set `CODEX_HOME` to choose the Codex config
+directory, or `AGK_INSTALL_ROOT` to choose where the kit is installed.
 
 Install the Git pre-commit guard in a repository:
 
@@ -150,8 +91,8 @@ Install the Git pre-commit guard in a repository:
 ./scripts/install_git_hooks.sh /path/to/your/repo
 ```
 
-If the repository already has a `pre-commit` hook, the installer keeps it as
-`pre-commit.bak-agk` and the AGK wrapper chains to it after AGK checks pass.
+If the repository already has a `pre-commit` hook, AGK keeps it as
+`pre-commit.bak-agk` and chains to it after AGK checks pass.
 
 ## Usage
 
@@ -173,70 +114,40 @@ Append a journal entry:
 python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment config and verified service health"
 ```
 
-Available journal domains are `ops`, `infra`, `prod`, and `research`. The
-journal helper embeds an `AGK-Session` marker from `AGK_SESSION_ID` or the most
-recent AGK state file; pass `--session-id` to override it.
+Journal domains are `ops`, `infra`, `prod`, and `research`. The helper embeds
+an `AGK-Session` marker from `AGK_SESSION_ID` or the most recent AGK state file;
+pass `--session-id` to override it.
 
 ## Configuration
 
-The default configuration is intentionally generic. Customize it through
-environment variables instead of editing the hook code.
+See `examples/config.example.env` for all supported environment variables.
 
-See `examples/config.example.env` for the full list.
+| Variable | Purpose |
+| --- | --- |
+| `AGK_HOOK_MODE` | `enforce` or `warn` for Stop-hook blocking behavior. |
+| `AGK_MATERIAL_CLOSEOUT_MODE` | `off`, `warn`, or `enforce` for material but non-red work. Default: `warn`. |
+| `AGK_PROTECTED_PATHS` | Colon-separated protected path markers. |
+| `AGK_JOURNAL_DIRS` | Colon-separated journal/manifest directories searched for evidence. |
+| `AGK_PRE_COMMIT_WARN_ONLY` | Set to `1` while adopting the pre-commit guard. |
+| `AGK_STATE_DIR` | Hook state directory. |
+| `AGK_INSTALL_ROOT` | Installed hook implementation path. |
+| `AGK_DEFAULT_JOURNAL` | Optional default journal path. |
+| `AGK_SESSION_ID` | Optional journal session marker override. |
+| `AGK_JOURNAL_INCLUDE_LOCAL` | Set to `1` only for private journals where hostnames and absolute paths are OK. |
 
-Common variables:
+## Files
 
-- `AGK_STATE_DIR`: where hook state is stored.
-- `AGK_INSTALL_ROOT`: where the installed hook implementation lives.
-- `AGK_HOOK_MODE`: `enforce` or `warn`.
-- `AGK_JOURNAL_DIRS`: colon-separated journal or manifest directories.
-- `AGK_PROTECTED_PATHS`: colon-separated path markers that should not be
-  committed.
-- `AGK_RESEARCH_GRACE_ROOTS`: optional colon-separated roots that may keep
-  temporary research files dirty for a limited time.
-- `AGK_RESEARCH_GRACE_PREFIXES`: optional dirty-path prefixes allowed under
-  those roots.
-- `AGK_RESEARCH_DIRTY_GRACE_HOURS`: grace period for those research paths.
-- `AGK_PRE_COMMIT_WARN_ONLY`: set to `1` to warn instead of blocking at
-  pre-commit time.
-- `AGK_MATERIAL_CLOSEOUT_MODE`: `off`, `warn`, or `enforce` for material but
-  non-red-zone work. The default is `warn`.
-- `AGK_DEFAULT_JOURNAL`: optional default journal path for the journal helper.
-- `AGK_SESSION_ID`: optional session marker override for journal helper output.
-- `AGK_JOURNAL_INCLUDE_LOCAL`: set to `1` to include hostnames and absolute
-  CWDs in journal entries. The default redacts local machine metadata.
-
-## Closeout Model
-
-The current default is Git-first. Ordinary source and documentation edits do
-not need an extra journal entry when `git status` and `git diff` already explain
-the work. Use manifests for high-impact work: non-scratch deletions, service or
-cron changes, database writes, cross-machine sync, protected artifacts, models,
-backups, deployment evidence, and other runtime changes that Git alone cannot
-fully describe.
-
-For red-zone work, the Stop hook accepts either a post-session Git commit or a
-journal/manifest file containing the current session marker, for example
-`AGK-Session: <session-id>`. A file touched after session start is not enough by
-itself.
-
-For material but non-red-zone work, the default is warning mode. Set
-`AGK_MATERIAL_CLOSEOUT_MODE=enforce` if you want every material session to end
-with a commit or session-marked journal/manifest.
-
-The skill uses this zone model:
-
-- **Green**: read-only queries, work under `scratch/`, ordinary source and
-  documentation edits, and local Git status/diff/add/commit/log work.
-- **Yellow**: new files outside `scratch/`, new Markdown outside normal
-  documentation slots, and remote-affecting but Git-backed operations such as
-  `git push`.
-- **Red**: non-scratch deletion, database writes, runtime or production config,
-  service/cron/systemd/docker changes, cross-machine sync, protected artifacts,
-  models, backups, hook changes, and deployment evidence.
-
-Red work should end with a Git commit or a manifest. Green work should not need
-extra paperwork when the diff already explains it.
+- `agk_common.py`: shared protected-path matching.
+- `hooks/hooks.json`: Codex lifecycle hook registration.
+- `hooks/agent_governance_hook.py`: Codex hook implementation.
+- `git-hooks/pre-commit`: portable pre-commit wrapper.
+- `git-hooks/agk_pre_commit.py`: staged-file guard.
+- `git-hooks/agk_repo_smoke.py`: optional repo-specific smoke-check hook.
+- `scripts/install_codex_hooks.sh`: installs Codex hooks.
+- `scripts/install_git_hooks.sh`: installs the Git pre-commit guard.
+- `scripts/agk_closeout_check.py`: handoff check.
+- `scripts/agk_journal_update.py`: session-marked journal helper.
+- `skills/agent-operational-governance/SKILL.md`: reusable operating skill.
 
 ## Safety Model
 

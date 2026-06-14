@@ -17,99 +17,52 @@ bug 我三个月前就修完了，并且已经有一个很完美的方案。
 
 *以上是本项目中唯一由人类书写的部分。*
 
-##
+## 概览
 
-AIcoding Governance Kit 是一个给 AI 编码项目使用的轻量级治理工具包。它把
-Codex 生命周期 hooks、Git pre-commit 检查、项目日志和收口脚本组合起来，让
-agent 可以快速推进，同时不至于悄悄丢失项目脉络。
+AIcoding Governance Kit 是一个给 AI 编码项目使用的本地治理工具包。它给 Codex
+和 Git 加一点结构，让 agent 可以快速推进，同时仍然留下可信的工作脉络。
 
-它故意保持本地化和文件化：不需要服务器，不需要 SaaS 账号，不需要数据库，也
-不绑定任何私有基础设施。安装 hooks，把脚本放进项目，然后按你的仓库规则调整
-配置即可。
+它不是 SaaS，不是安全边界，也不是重流程框架。它是一套可以放进仓库、可以审计、
+可以按项目调整的 hook + script + skill 工具包。
 
-## 它解决什么问题
+它的设计刻意走中间路线：
 
-AIcoding Governance Kit 关注的是一个很实际的问题：agent 驱动的项目需要记忆、
-边界和证据。
+- 不是只写文档。文档如果不和 Git 状态绑定，自己也会漂移。
+- 不是默认重管控。每一步都要补流程时，agent 会开始优化治理，而不是优化产品。
+- 普通工作 Git-first。源码和文档通常应该由 `git status`、`git diff` 和 commit
+  解释。
+- 高影响工作要更强证据。运行时变更、数据写入、受保护产物、模型、备份、跨机器
+  同步和部署证据，需要 commit 或带 session 标记的 journal/manifest。
 
-它可以帮你：
+## 你会得到什么
 
-- 在 Codex session 启动时加载治理上下文
-- 识别实质性工具调用，例如编辑、提交、服务命令、数据命令和跨机器同步
-- 阻断少量最容易破坏用户工作的危险命令
-- 防止秘钥、模型、数据库、日志、导出文件等受保护产物进入 Git
-- 把 hook 事件记录到本地，方便审计和排查
-- 普通代码工作默认使用 Git status、diff 和 commit 作为证据
-- 对高影响操作要求更强的收口证据
-- 提供一份可复用的 Codex skill，告诉 agent 如何干净交接工作
+- **Codex 生命周期 hooks**：在 session 启动时注入上下文，检查 prompt/tool
+  事件，阻断少量破坏性操作，记录 material 工作，并只在高影响工作上强制收口。
+- **Git pre-commit 守卫**：阻止受保护产物、大文件、常见秘钥模式，以及没有
+  journal/report/manifest 的实质性代码、配置或 hook 变更进入提交。
+- **收口工具**：检查仓库是否可以交接；当 Git 不足以解释工作时，写入带 session
+  标记的简短 journal。
+- **可复用 agent skill**：告诉 agent 如何使用 `scratch/`、Git 证据、受保护
+  产物规则，以及 green/yellow/red 收口模型。
 
-它不能替代工程判断、CI、备份、分支保护或人工 review。它的作用是处理 AI 编码
-中最常见的日常失控：agent 改得很快，但项目解释不清自己到底发生了什么。
+## 证据模型
 
-## 核心设计
+AGK 不把所有操作一刀切，而是按风险分区：
 
-这个工具的核心不是“多写文档”。只靠文档记录，项目还是会乱：agent 可能更新了
-笔记，却忘了真实运行状态，最后仓库、日志和实际系统之间仍然对不上。
+- **Green**：只读工作、`scratch/` 输出、普通源码/文档编辑、本地 Git
+  status/diff/add/commit/log。Git 证据足够。
+- **Yellow**：`scratch/` 外的新文件、普通文档槽位外的新 Markdown、以及
+  `git push` 这类有远端影响但仍由 Git 承载的操作。需要可见，但不阻断普通
+  交接。
+- **Red**：非 `scratch/` 删除、数据库写入、运行时或生产配置、service/cron/
+  systemd/docker 变更、跨机器同步、受保护产物、模型、备份、hook 变更和部署
+  证据。必须用 session 后的 commit，或包含 `AGK-Session: <session-id>` 的
+  journal/manifest 收口。
 
-核心也不是“把每一步都管得很重”。规则太重时，agent 会开始把主要精力放在满足
-治理要求上，而不是继续把东西做好。这会制造另一种失败模式：项目看起来很有
-记录，但推进变慢，agent 开始优化流程而不是优化结果。
-
-AIcoding Governance Kit 走的是中间路线：
-
-- 普通源码和文档工作，用 Git 作为证据链。
-- 用轻量 hooks 提前拦住最危险的边界。
-- 日志和 manifest 只留给 Git 解释不清的工作：运行时变更、跨机器同步、数据
-  写入、备份、模型、受保护产物和部署证据。
-- 给 agent 足够的结构感，让它不迷路；但不要让治理本身变成主要任务。
-
-## 工作方式
-
-这个工具包有四层：
-
-1. **Codex 生命周期 hooks**
-
-   hook 会在 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`
-   和 `Stop` 阶段运行。它会注入操作上下文，记录实质性工作，阻断部分破坏性
-   命令，识别受保护产物路径，并且只在工作进入高影响范围时要求收口证据。
-
-2. **Git pre-commit 守卫**
-
-   pre-commit hook 会在提交前检查 staged 文件。它会阻断受保护产物路径、大
-   文件、常见秘钥模式，以及没有日志、报告或 manifest 的实质性源码、配置、
-   hook 变更。刚接入项目时也可以切到 warn-only 模式。
-
-3. **收口脚本**
-
-   `agk_closeout_check.py` 用于检查仓库是否可以交接，以及是否还有受保护产物
-   处于 dirty 或 staged 状态。`agk_journal_update.py` 用于在确实需要日志或
-   manifest 时追加简短、带时间戳的工作记录。
-
-4. **Agent 操作 skill**
-
-   `skills/agent-operational-governance/SKILL.md` 给 agent 一套紧凑的工作模型：
-   临时输出放进 `scratch/`，普通工作优先使用 Git 证据，不把运行时产物提交进
-   仓库，高影响操作必须用 commit 或 manifest 收口。
-
-## 仓库内容
-
-- `hooks/hooks.json`：Codex session、prompt、tool 和 stop 事件的 hook 注册。
-- `agk_common.py`：hook、pre-commit 守卫和 closeout checker 共用的 protected
-  path 匹配逻辑。
-- `hooks/agent_governance_hook.py`：生命周期 hook 实现。
-- `git-hooks/pre-commit`：可移植的 pre-commit wrapper。
-- `git-hooks/agk_pre_commit.py`：针对已暂存文件的日志、秘钥和受保护产物守卫。
-- `git-hooks/agk_repo_smoke.py`：可选的仓库专属 smoke check 扩展点。
-- `scripts/install_codex_hooks.sh`：将 Codex hook 文件安装到
-  `~/.codex/agent-governance-kit`。
-- `scripts/install_git_hooks.sh`：将 Git pre-commit 守卫安装到指定仓库。
-- `scripts/agk_journal_update.py`：向日志追加收口记录。
-- `scripts/agk_closeout_check.py`：在交接前检查仓库状态。
-- `skills/agent-operational-governance/SKILL.md`：描述操作纪律的 Codex skill。
+Material 但非 red 的工作默认只警告。如果你希望每一次实质性工作都必须收口，
+可以设置 `AGK_MATERIAL_CLOSEOUT_MODE=enforce`。
 
 ## 安装
-
-克隆仓库后，在仓库根目录运行安装脚本。
 
 安装 Codex hooks：
 
@@ -117,9 +70,9 @@ AIcoding Governance Kit 走的是中间路线：
 ./scripts/install_codex_hooks.sh
 ```
 
-安装器会把 AIcoding Governance Kit 的 hook 组合并进已有 `hooks.json`，而不是
-替换不相关的 hooks。设置 `CODEX_HOME` 可以选择 Codex 配置目录，设置
-`AGK_INSTALL_ROOT` 可以选择本工具包的安装位置。
+安装器会把 AGK hook 组合并进已有 `hooks.json`，不会替换不相关的 hooks。设置
+`CODEX_HOME` 可以选择 Codex 配置目录，设置 `AGK_INSTALL_ROOT` 可以选择本工具包
+安装位置。
 
 在仓库中安装 Git pre-commit 守卫：
 
@@ -127,8 +80,8 @@ AIcoding Governance Kit 走的是中间路线：
 ./scripts/install_git_hooks.sh /path/to/your/repo
 ```
 
-如果仓库已经有 `pre-commit` hook，安装器会把它保留为
-`pre-commit.bak-agk`，并在 AGK 检查通过后由 AGK wrapper 继续调用它。
+如果仓库已经有 `pre-commit` hook，AGK 会把它保留为 `pre-commit.bak-agk`，并在
+AGK 检查通过后继续调用它。
 
 ## 使用
 
@@ -144,68 +97,46 @@ python3 scripts/agk_closeout_check.py --repo /path/to/your/repo
 python3 scripts/agk_closeout_check.py --repo /path/to/your/repo --allow-dirty
 ```
 
-追加日志记录：
+追加 journal：
 
 ```bash
 python3 scripts/agk_journal_update.py --domain ops --item "Updated deployment config and verified service health"
 ```
 
-可用日志域包括 `ops`、`infra`、`prod` 和 `research`。journal helper 会从
+journal 域包括 `ops`、`infra`、`prod` 和 `research`。helper 会从
 `AGK_SESSION_ID` 或最近的 AGK state 文件中写入 `AGK-Session` 标记；也可以用
 `--session-id` 手动覆盖。
 
 ## 配置
 
-默认配置有意保持通用。请通过环境变量自定义配置，而不是直接编辑 hook 代码。
+完整环境变量见 `examples/config.example.env`。
 
-完整变量列表见 `examples/config.example.env`。
+| 变量 | 用途 |
+| --- | --- |
+| `AGK_HOOK_MODE` | Stop hook 的 `enforce` 或 `warn` 模式。 |
+| `AGK_MATERIAL_CLOSEOUT_MODE` | material 但非 red 工作的 `off`、`warn` 或 `enforce` 模式，默认 `warn`。 |
+| `AGK_PROTECTED_PATHS` | 以冒号分隔的受保护路径标记。 |
+| `AGK_JOURNAL_DIRS` | 搜索 journal/manifest 证据的目录。 |
+| `AGK_PRE_COMMIT_WARN_ONLY` | 接入 pre-commit 初期可设为 `1`。 |
+| `AGK_STATE_DIR` | hook 状态目录。 |
+| `AGK_INSTALL_ROOT` | 已安装 hook 实现路径。 |
+| `AGK_DEFAULT_JOURNAL` | 可选默认 journal 路径。 |
+| `AGK_SESSION_ID` | 可选 journal session 标记覆盖值。 |
+| `AGK_JOURNAL_INCLUDE_LOCAL` | 仅在私有 journal 中设为 `1`，用于包含主机名和绝对路径。 |
 
-常用变量：
+## 文件
 
-- `AGK_STATE_DIR`：hook 状态的存储位置。
-- `AGK_INSTALL_ROOT`：已安装 hook 实现的位置。
-- `AGK_HOOK_MODE`：`enforce` 或 `warn`。
-- `AGK_JOURNAL_DIRS`：以冒号分隔的日志或 manifest 目录。
-- `AGK_PROTECTED_PATHS`：以冒号分隔的路径标记，这些路径不应被提交。
-- `AGK_RESEARCH_GRACE_ROOTS`：可选的冒号分隔根目录，允许临时研究文件在一段
-  时间内保持 dirty。
-- `AGK_RESEARCH_GRACE_PREFIXES`：上述根目录下允许 dirty 的路径前缀。
-- `AGK_RESEARCH_DIRTY_GRACE_HOURS`：这些研究路径的宽限小时数。
-- `AGK_PRE_COMMIT_WARN_ONLY`：设为 `1` 时，pre-commit 只警告不阻断。
-- `AGK_MATERIAL_CLOSEOUT_MODE`：针对 material 但非 red-zone 工作，可设为
-  `off`、`warn` 或 `enforce`。默认是 `warn`。
-- `AGK_DEFAULT_JOURNAL`：日志 helper 使用的可选默认日志路径。
-- `AGK_SESSION_ID`：日志 helper 输出中使用的可选 session 标记覆盖值。
-- `AGK_JOURNAL_INCLUDE_LOCAL`：设为 `1` 时，日志会包含主机名和绝对 CWD。
-  默认会脱敏本地机器元数据。
-
-## 收口模型
-
-当前默认是 Git-first。普通源码和文档编辑如果已经能通过 `git status` 和
-`git diff` 解释清楚，不需要额外写日志。manifest 用于高影响操作：非
-`scratch/` 删除、服务或 cron 变更、数据库写入、跨机器同步、受保护产物、
-模型、备份、部署证据，以及其他 Git 无法完整描述的运行时变更。
-
-对于 red-zone 工作，Stop hook 接受两种证据：session 开始后的 Git commit，
-或者包含当前 session 标记的 journal/manifest，例如 `AGK-Session: <session-id>`。
-仅仅在 session 开始后 touch 过某个文档，不再算作有效收口证据。
-
-对于 material 但非 red-zone 的工作，默认是 warn 模式。如果你希望每一次实质性
-工作都必须用 commit 或带 session 标记的 journal/manifest 收口，可以设置
-`AGK_MATERIAL_CLOSEOUT_MODE=enforce`。
-
-skill 使用的分区模型是：
-
-- **Green**：只读查询、`scratch/` 下的工作、普通源码和文档编辑、本地 Git
-  status/diff/add/commit/log 操作。
-- **Yellow**：`scratch/` 外的新文件、普通文档槽位外的新 Markdown、以及
-  `git push` 这类有远端影响但仍然由 Git 承载的操作。
-- **Red**：非 `scratch/` 删除、数据库写入、运行时或生产配置、service/cron/
-  systemd/docker 变更、跨机器同步、受保护产物、模型、备份、hook 变更和部署
-  证据。
-
-Red 工作应该用 Git commit 或 manifest 结束。Green 工作如果 diff 已经能解释
-清楚，就不应该被额外文书拖住。
+- `agk_common.py`：共用 protected path 匹配逻辑。
+- `hooks/hooks.json`：Codex 生命周期 hook 注册。
+- `hooks/agent_governance_hook.py`：Codex hook 实现。
+- `git-hooks/pre-commit`：可移植 pre-commit wrapper。
+- `git-hooks/agk_pre_commit.py`：staged-file 守卫。
+- `git-hooks/agk_repo_smoke.py`：可选仓库专属 smoke-check hook。
+- `scripts/install_codex_hooks.sh`：安装 Codex hooks。
+- `scripts/install_git_hooks.sh`：安装 Git pre-commit 守卫。
+- `scripts/agk_closeout_check.py`：交接检查。
+- `scripts/agk_journal_update.py`：带 session 标记的 journal helper。
+- `skills/agent-operational-governance/SKILL.md`：可复用操作 skill。
 
 ## 安全模型
 
