@@ -54,6 +54,27 @@ It is not a replacement for engineering judgment, CI, backups, branch
 protection, or human review. It is a guardrail for the everyday failure modes
 that appear when a coding agent can change more than the project can explain.
 
+## Design Principle
+
+The core idea is not "write more documents." Documentation alone can become
+another source of drift: the agent may update notes, forget the actual running
+state, and still leave the project hard to trust.
+
+The core idea is also not "make every action heavy." If the rules are too
+strict, the agent starts spending its effort satisfying governance instead of
+building the thing. That creates a different failure mode: the project looks
+well documented, but the work slows down and the agent optimizes for ceremony.
+
+AIcoding Governance Kit is built around a middle path:
+
+- Git is the evidence chain for ordinary source and documentation work.
+- Lightweight hooks catch the dangerous edges before they become expensive.
+- Journals and manifests are reserved for work that Git cannot explain well:
+  runtime changes, cross-machine sync, data writes, backups, models, protected
+  artifacts, and deployment evidence.
+- The agent gets enough structure to stay oriented, but not so much structure
+  that governance becomes the main task.
+
 ## How It Works
 
 The kit has four layers:
