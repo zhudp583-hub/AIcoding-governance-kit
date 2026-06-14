@@ -89,6 +89,20 @@ class HookGuardTests(unittest.TestCase):
             hook.bash_touches_protected("printf SECRET > .env"),
             "shell redirection touches protected artifact path: .env",
         )
+        with patch.dict(os.environ, {"AGK_ALLOW_PROTECTED": "1"}):
+            self.assertIsNone(hook.bash_touches_protected("printf SECRET > .env"))
+            self.assertEqual(
+                hook.bash_protected_path_reason("printf SECRET > .env"),
+                "shell redirection touches protected artifact path: .env",
+            )
+
+    def test_red_zone_detection_is_narrower_than_material_work(self) -> None:
+        self.assertTrue(hook.is_material_command("python3 scripts/update_docs.py"))
+        self.assertFalse(hook.is_red_zone_command("python3 scripts/update_docs.py"))
+        self.assertTrue(hook.is_red_zone_command("rm old-output.txt"))
+        self.assertFalse(hook.is_red_zone_command("rm scratch/session/tmp.txt"))
+        self.assertTrue(hook.is_red_zone_command("systemctl restart app.service"))
+        self.assertTrue(hook.is_red_zone_command("rsync -a data/ host:/backup/"))
 
 
 class GitHookTests(unittest.TestCase):

@@ -47,7 +47,8 @@ small amount of discipline:
 - detect material code, config, service, data, and Git operations
 - block obviously dangerous commands before they run
 - record agent activity into a local audit log
-- require a journal, manifest, or commit before a material session finishes
+- use Git status and diff as the default evidence for ordinary code work
+- require a manifest or commit for high-impact operations
 - stop large runtime artifacts and secrets from entering Git
 - provide reusable scripts for project closeout
 
@@ -129,6 +130,15 @@ Common variables:
 - `AGK_RESEARCH_DIRTY_GRACE_HOURS`: grace period for those research paths.
 - `AGK_JOURNAL_INCLUDE_LOCAL`: set to `1` to include hostnames and absolute
   CWDs in journal entries. The default redacts local machine metadata.
+
+## Closeout Model
+
+The current default is Git-first. Ordinary source and documentation edits do
+not need an extra journal entry when `git status` and `git diff` already explain
+the work. Use manifests for high-impact work: non-scratch deletions, service or
+cron changes, database writes, cross-machine sync, protected artifacts, models,
+backups, deployment evidence, and other runtime changes that Git alone cannot
+fully describe.
 
 ## Safety Model
 

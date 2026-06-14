@@ -51,6 +51,14 @@ MATERIAL_COMMAND_PATTERNS = [
     r"\b(crontab\s+|docker\s+(restart|stop|compose\s+down|compose\s+up))\b",
     r"\b(rm\s+|mv\s+|cp\s+|rsync\s+|scp\s+)\b",
     r"\b(psql|pg_dump|VACUUM|DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b",
+    r"\b(python3?|node|bash|sh|zsh|uv|npm|pnpm|yarn|make)\b",
+]
+
+RED_ZONE_COMMAND_PATTERNS = [
+    r"\b(systemctl\s+(restart|stop|disable|enable|daemon-reload))\b",
+    r"\b(crontab\s+|docker\s+(restart|stop|compose\s+down|compose\s+up))\b",
+    r"\b(rsync|scp)\b",
+    r"\b(psql|pg_dump|VACUUM|DROP\s+TABLE|TRUNCATE|DELETE\s+FROM)\b",
 ]
 
 PROTECTED_ARTIFACT_SUFFIXES = (
@@ -110,7 +118,13 @@ def load_state(session_id: str) -> dict[str, Any]:
             return json.loads(path.read_text())
         except json.JSONDecodeError:
             pass
-    return {"session_id": session_id, "started_at": now(), "material": False, "events": []}
+    return {
+        "session_id": session_id,
+        "started_at": now(),
+        "material": False,
+        "red_zone": False,
+        "events": [],
+    }
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -251,6 +265,44 @@ def is_material_command(command: str) -> bool:
     return any(re.search(pattern, command, re.IGNORECASE) for pattern in MATERIAL_COMMAND_PATTERNS)
 
 
+def command_targets(args: list[str]) -> list[str]:
+    targets: list[str] = []
+    after_options = False
+    for arg in args:
+        if not after_options and arg == "--":
+            after_options = True
+            continue
+        if not after_options and arg.startswith("-") and arg != "-":
+            continue
+        targets.append(arg)
+    return targets
+
+
+def scratch_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").strip()
+    if not normalized:
+        return False
+    return normalized.startswith("scratch/") or "/scratch/" in normalized
+
+
+def is_red_zone_command(command: str) -> bool:
+    if any(re.search(pattern, command, re.IGNORECASE) for pattern in RED_ZONE_COMMAND_PATTERNS):
+        return True
+    for words in command_segments(command):
+        executable, args = command_name_and_args(words)
+        executable = Path(executable).name
+        if executable == "rm":
+            targets = command_targets(args)
+            if targets and any(not scratch_path(target) for target in targets):
+                return True
+        if executable in {"git", "python", "python3", "bash", "sh"} and any(
+            re.search(r"(hooks?/|pre-commit|post-commit|deploy|deployment|service|systemd)", arg, re.IGNORECASE)
+            for arg in args
+        ):
+            return True
+    return False
+
+
 def command_segments(command: str) -> list[list[str]]:
     segments: list[list[str]] = []
     for chunk in SHELL_SEPARATORS_RE.split(command):
@@ -354,9 +406,11 @@ def protected_path(path: str) -> bool:
     return basename.endswith(PROTECTED_ARTIFACT_SUFFIXES)
 
 
-def bash_touches_protected(command: str) -> str | None:
-    if os.environ.get("AGK_ALLOW_PROTECTED") == "1":
-        return None
+def protected_dirty_paths(paths: list[str]) -> list[str]:
+    return [path for path in paths if protected_path(path)]
+
+
+def bash_protected_path_reason(command: str) -> str | None:
     for match in REDIRECT_RE.finditer(command):
         path = match.group(2)
         if protected_path(path):
@@ -373,10 +427,14 @@ def bash_touches_protected(command: str) -> str | None:
     return None
 
 
-def patch_touches_protected(event: dict[str, Any]) -> str | None:
-    if event.get("tool_name") != "apply_patch":
-        return None
+def bash_touches_protected(command: str) -> str | None:
     if os.environ.get("AGK_ALLOW_PROTECTED") == "1":
+        return None
+    return bash_protected_path_reason(command)
+
+
+def patch_protected_path_reason(event: dict[str, Any]) -> str | None:
+    if event.get("tool_name") != "apply_patch":
         return None
     text = command_text(event)
     for line in text.splitlines():
@@ -385,6 +443,12 @@ def patch_touches_protected(event: dict[str, Any]) -> str | None:
             if protected_path(path):
                 return f"apply_patch touches protected artifact path: {path}"
     return None
+
+
+def patch_touches_protected(event: dict[str, Any]) -> str | None:
+    if os.environ.get("AGK_ALLOW_PROTECTED") == "1":
+        return None
+    return patch_protected_path_reason(event)
 
 
 def json_out(obj: dict[str, Any]) -> None:
@@ -457,6 +521,7 @@ def main() -> int:
                 "git_root": root,
                 "git_head_start": git_head(root) if root else None,
                 "material": False,
+                "red_zone": False,
             }
         )
         save_state(state)
@@ -465,8 +530,8 @@ def main() -> int:
                 "hookSpecificOutput": {
                     "hookEventName": "SessionStart",
                     "additionalContext": (
-                        "Agent Governance Kit is active. For material changes, finish with "
-                        "a journal/manifest update or Git commit before final response."
+                        "Agent Governance Kit is active. Use Git status/diff for ordinary "
+                        "work; commit or write a manifest for high-impact operations."
                     ),
                 }
             }
@@ -481,8 +546,8 @@ def main() -> int:
                     "hookSpecificOutput": {
                         "hookEventName": "UserPromptSubmit",
                         "additionalContext": (
-                            "If this turn changes files, services, data, or runtime state, "
-                            "update the correct work journal/manifest and close Git state before final."
+                            "If this turn changes services, data, deployment state, or protected "
+                            "artifacts, close with a commit or manifest before final."
                         ),
                     }
                 }
@@ -504,6 +569,9 @@ def main() -> int:
         if event.get("tool_name") in {"apply_patch", "Edit", "Write"} or is_material_command(command):
             state["material"] = True
             state["last_material_at"] = now()
+            if is_red_zone_command(command) or patch_protected_path_reason(event) or bash_protected_path_reason(command):
+                state["red_zone"] = True
+                state["last_red_zone_at"] = now()
             state.setdefault("material_events", []).append(
                 {"event": event.get("tool_name"), "command": command[:240], "ts": now()}
             )
@@ -514,29 +582,31 @@ def main() -> int:
         if event.get("stop_hook_active"):
             json_out({"continue": True})
             return 0
-        if not state.get("material"):
-            json_out({"continue": True})
-            return 0
         started_at = float(state.get("started_at") or now())
-        evidence_ok, evidence = has_closeout_evidence(cwd, started_at)
         root = git_root(cwd)
         dirty_paths = git_dirty_paths(root) if root else []
-        dirty = bool(dirty_paths)
-        research_dirty_ok, research_dirty_reason = research_dirty_allowed(root, dirty_paths)
-        if evidence_ok and (not dirty or research_dirty_ok):
+        protected_dirty = protected_dirty_paths(dirty_paths)
+        if protected_dirty:
+            stop_continue(
+                "Protected artifact paths are dirty or staged: "
+                + ", ".join(protected_dirty[:8])
+                + ". Remove them from Git or record an approved private artifact path before final."
+            )
+            return 0
+        if not state.get("material") and not state.get("red_zone"):
             json_out({"continue": True})
             return 0
-        problems = []
-        if dirty and not research_dirty_ok:
-            problems.append(f"dirty worktree remains in {root}")
-        elif dirty:
-            problems.append(f"{research_dirty_reason}, but closeout evidence is still required")
-        if not evidence_ok:
-            problems.append(evidence)
+        if not state.get("red_zone"):
+            json_out({"continue": True})
+            return 0
+        evidence_ok, evidence = has_closeout_evidence(cwd, started_at)
+        if evidence_ok:
+            json_out({"continue": True})
+            return 0
         stop_continue(
-            "Material agent work was detected but closeout is incomplete: "
-            + "; ".join(problems)
-            + ". Update the work journal/manifest and commit or explicitly document residual dirty state."
+            "High-impact agent work was detected but closeout is incomplete: "
+            + evidence
+            + ". Commit the change or update a manifest before final response."
         )
         return 0
 
