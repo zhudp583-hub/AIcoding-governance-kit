@@ -47,12 +47,30 @@ The design is deliberately balanced:
   events, block selected destructive actions, track material work, and enforce
   closeout only when the work is high-impact.
 - **Git pre-commit guard**: stops protected artifacts, large files, common
-  secret patterns, and material code/config/hook changes without a journal,
-  report, or manifest.
+  secret patterns, and optional project smoke-check failures before they enter
+  a commit.
 - **Closeout helpers**: check whether a repo is ready for handoff and write
   short session-marked journal entries when Git alone is not enough.
 - **Reusable agent skill**: tells the agent how to use `scratch/`, Git evidence,
   protected artifact rules, and the green/yellow/red closeout model.
+
+## Field-Tested Behaviors
+
+AGK includes a few small behaviors that came from real long-running agent
+workspaces:
+
+- **Resume-safe state**: if a session resumes, the hook keeps previously
+  recorded high-impact state instead of resetting it.
+- **Script discovery warning**: when an agent writes a task-style Python script
+  such as `train_*`, `build_*`, `run_*`, or `audit_*`, AGK warns if similar
+  scripts already exist nearby.
+- **Script manifest handoff**: if a repository has `scripts/MANIFEST.md`, AGK
+  copies it into the session scratch area so the agent can see script ownership
+  and do-not-duplicate notes early.
+- **Balanced pre-commit checks**: pre-commit blocks protected artifacts,
+  suspicious secrets, large runtime files, and failed smoke checks. Ordinary
+  material edits are left to Git status, diff, review, and optional closeout
+  policy instead of being blocked by default.
 
 ## Evidence Model
 
@@ -173,6 +191,8 @@ This repository is intentionally sanitized:
 - no personal machine paths
 - no secrets
 - no business-specific deployment logic
+- no hostnames, IP addresses, or access paths from the private workspace that
+  shaped the field-tested behaviors above
 
 Project-specific policies belong in local configuration, private forks, or
 private deployment scripts.

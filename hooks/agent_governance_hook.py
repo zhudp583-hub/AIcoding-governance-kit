@@ -60,6 +60,9 @@ RED_ZONE_COMMAND_PATTERNS = [
 
 SHELL_SEPARATORS_RE = re.compile(r"(?:&&|\|\||;|\n)")
 REDIRECT_RE = re.compile(r"(?:^|[\s;&|])(?:[0-9]?>|[0-9]?>>|&>)\s*(['\"]?)([^'\"\s;&|]+)\1")
+SCRIPT_TASK_VERBS = frozenset(
+    "train build validate audit split orchestrate watch run smoke verify derive".split()
+)
 
 
 def run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -294,6 +297,55 @@ def is_red_zone_command(command: str) -> bool:
     return False
 
 
+def script_discovery_check(new_path: str, cwd: str) -> str | None:
+    name = Path(new_path).stem
+    verb = name.split("_")[0] if "_" in name else name
+    if verb not in SCRIPT_TASK_VERBS:
+        return None
+
+    safe_cwd = cwd if Path(cwd).exists() else str(Path.cwd())
+    root_result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=safe_cwd,
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
+    root = Path(root_result.stdout.strip()) if root_result.returncode == 0 else Path(safe_cwd)
+
+    candidate_dirs = [
+        Path(new_path).parent,
+        root / "scripts",
+    ]
+    existing: list[str] = []
+    for scripts_dir in candidate_dirs:
+        if scripts_dir.exists() and scripts_dir.is_dir():
+            for py in sorted(scripts_dir.glob(f"{verb}_*.py")):
+                try:
+                    rel = str(py.relative_to(root))
+                except ValueError:
+                    rel = str(py)
+                if rel not in existing and py.name != Path(new_path).name:
+                    existing.append(rel)
+
+    manifest_path = root / "scripts" / "MANIFEST.md"
+    if not existing:
+        return None
+
+    lines = [
+        f"[SCRIPT DISCOVERY] Writing {Path(new_path).name} but {len(existing)} '{verb}_*.py' script(s) already exist:",
+    ]
+    for item in existing[:6]:
+        lines.append(f"  {item}")
+    if len(existing) > 6:
+        lines.append(f"  ... and {len(existing) - 6} more")
+    if manifest_path.exists():
+        lines.append("Read scripts/MANIFEST.md for purpose/do-not-duplicate notes before proceeding.")
+    else:
+        lines.append("Check the scripts listed above before creating a new one.")
+    return "\n".join(lines)
+
+
 def command_segments(command: str) -> list[list[str]]:
     segments: list[list[str]] = []
     for chunk in SHELL_SEPARATORS_RE.split(command):
@@ -438,6 +490,10 @@ def block_pretool(reason: str) -> None:
     )
 
 
+def warn_pretool(reason: str) -> None:
+    json_out({"systemMessage": f"Agent Governance Kit warning: {reason}"})
+
+
 def stop_continue(reason: str) -> None:
     if MODE == "warn":
         json_out({"systemMessage": f"Agent Governance Kit closeout warning: {reason}"})
@@ -489,18 +545,37 @@ def main() -> int:
 
     if hook_event == "SessionStart":
         root = git_root(cwd)
-        state.update(
-            {
-                "started_at": now(),
-                "cwd": cwd,
-                "git_root": root,
-                "git_head_start": git_head(root) if root else None,
-                "material": False,
-                "red_zone": False,
-                "closeout_marker": closeout_marker(session_id),
-            }
-        )
+        safe_session = re.sub(r"[^A-Za-z0-9_.-]+", "_", session_id or "unknown")
+        scratch_path = f"scratch/{safe_session}/"
+        is_resume = state_path(session_id).exists()
+        updates: dict[str, Any] = {
+            "cwd": cwd,
+            "git_root": root,
+            "git_head_start": git_head(root) if root else None,
+            "scratch_path": scratch_path,
+            "closeout_marker": closeout_marker(session_id),
+        }
+        if not is_resume:
+            updates["started_at"] = now()
+            updates["material"] = False
+            updates["red_zone"] = False
+        state.update(updates)
         save_state(state)
+        if root and not is_resume:
+            manifest = Path(root) / "scripts" / "MANIFEST.md"
+            if manifest.exists():
+                scratch_dir = Path(root) / scratch_path
+                scratch_dir.mkdir(parents=True, exist_ok=True)
+                dest = scratch_dir / "SCRIPT_MANIFEST.md"
+                dest.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
+                append_event(
+                    {
+                        "session_id": session_id,
+                        "event": "manifest_injected",
+                        "manifest": str(manifest),
+                        "dest": str(dest),
+                    }
+                )
         json_out(
             {
                 "hookSpecificOutput": {
@@ -533,6 +608,21 @@ def main() -> int:
         return 0
 
     if hook_event == "PreToolUse":
+        if event.get("tool_name") == "Write":
+            new_path = str((event.get("tool_input") or {}).get("path") or "")
+            if new_path.endswith(".py"):
+                discovery_msg = script_discovery_check(new_path, cwd)
+                if discovery_msg:
+                    warn_pretool(discovery_msg)
+                    append_event(
+                        {
+                            "session_id": session_id,
+                            "event": "script_discovery_warning",
+                            "new_path": new_path,
+                            "message": discovery_msg[:400],
+                        }
+                    )
+            return 0
         command = command_text(event)
         reason = block_reason(command) or patch_touches_protected(event)
         if not reason and event.get("tool_name") == "Bash":

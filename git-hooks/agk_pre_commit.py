@@ -16,17 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agk_common import protected_path
 
-JOURNAL_OR_MANIFEST_RE = re.compile(
-    r"(^|/)(worklog/|reports/|manifests/|docs/.*changes.*\.md$|.*CHANGELOG.*\.md$)",
-    re.IGNORECASE,
-)
-
-MATERIAL_PATH_RE = re.compile(
-    r"(\.py|\.sh|\.sql|\.toml|\.json|\.yaml|\.yml|\.service|\.timer|Dockerfile|docker-compose.*\.ya?ml)$"
-    r"|(^|/)(scripts/|tools/|config/|systemd/|codex/|\.codex/|cron/)",
-    re.IGNORECASE,
-)
-
 SECRET_PATTERNS = [
     (re.compile(r"-----BEGIN (RSA |OPENSSH |EC |DSA |PRIVATE )?PRIVATE KEY-----"), "private key"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"), "OpenAI-style API key"),
@@ -116,9 +105,6 @@ def main() -> int:
     if not files:
         return 0
 
-    has_journal = any(JOURNAL_OR_MANIFEST_RE.search(path) for path in files)
-    has_material = any(MATERIAL_PATH_RE.search(path) for path in files)
-
     for path in files:
         if protected_path(path):
             problems.append(f"protected artifact path staged: {path}")
@@ -129,9 +115,6 @@ def main() -> int:
         if text is None:
             continue
         problems.extend(secret_findings(path, text))
-
-    if has_material and not has_journal:
-        problems.append("material code/config/hook change is staged without a journal, report, or manifest file")
 
     script = smoke_script(repo)
     if script:
@@ -146,7 +129,7 @@ def main() -> int:
         if prefix == "WARN":
             return 0
         print(
-            "\nAdd/update a worklog, report, or manifest, or unstage protected artifacts before committing.",
+            "\nUnstage protected artifacts or large runtime files before committing.",
             file=sys.stderr,
         )
         return 1
