@@ -35,25 +35,14 @@ explain, and leave evidence before the work becomes hard to trust.
 
 ## Key Capabilities
 
-- **Search before adding scripts**: lifecycle hooks warn the agent before it
-  creates task-style scripts such as `train_*`, `build_*`, `run_*`, or
-  `audit_*` when similar scripts already exist. This reduces version explosion,
-  duplicate work, and "which script is the real one?" confusion.
-- **Keep session risk state across resumes**: if a session is interrupted and
-  resumed, high-impact work stays marked high-impact until it is closed out.
-- **Bring script ownership into the session**: when `scripts/MANIFEST.md`
-  exists, AGK copies it into the session scratch area so the agent sees
-  existing script purpose and do-not-duplicate notes early.
-- **Separate normal edits from high-impact operations**: ordinary source and
-  docs work can stay Git-first; database writes, service changes, deployments,
-  protected artifacts, backups, and cross-machine sync require stronger
-  evidence.
-- **Block common commit mistakes**: the Git pre-commit guard stops protected
-  artifacts, large runtime files, suspicious secrets, and project smoke-check
-  failures before they enter history.
-- **Make handoff explicit**: closeout helpers and the reusable skill give the
-  agent a small, repeatable way to summarize what changed, what was checked,
-  and what still needs human attention.
+| Capability | Problem it prevents |
+| --- | --- |
+| 🔎 **Search before adding scripts** | Lifecycle hooks warn the agent before it creates task-style scripts such as `train_*`, `build_*`, `run_*`, or `audit_*` when similar scripts already exist. This reduces version explosion, duplicate work, and "which script is the real one?" confusion. |
+| 🧭 **Keep session risk state across resumes** | If a session is interrupted and resumed, high-impact work stays marked high-impact until it is closed out. |
+| 📋 **Bring script ownership into the session** | When `scripts/MANIFEST.md` exists, AGK copies it into the session scratch area so the agent sees existing script purpose and do-not-duplicate notes early. |
+| 🚦 **Separate normal edits from high-impact operations** | Ordinary source and docs work can stay Git-first; database writes, service changes, deployments, protected artifacts, backups, and cross-machine sync require stronger evidence. |
+| 🛡️ **Block common commit mistakes** | The Git pre-commit guard stops protected artifacts, large runtime files, suspicious secrets, and project smoke-check failures before they enter history. |
+| 🤝 **Make handoff explicit** | Closeout helpers and the reusable skill give the agent a small, repeatable way to summarize what changed, what was checked, and what still needs human attention. |
 
 ## Overview
 
