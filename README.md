@@ -2,6 +2,38 @@
 
 [中文说明](README.zh-CN.md)
 
+AIcoding Governance Kit helps AI coding agents stop creating accidental chaos:
+duplicate scripts, stale versions, unclear handoffs, risky file changes, and
+unexplained production-impacting work.
+
+It does this with local hooks, Git guards, closeout helpers, and an agent skill.
+The goal is simple: let the agent move quickly, but make it search, reuse,
+explain, and leave evidence before the work becomes hard to trust.
+
+## Key Capabilities
+
+- **Search before adding scripts**: lifecycle hooks warn the agent before it
+  creates task-style scripts such as `train_*`, `build_*`, `run_*`, or
+  `audit_*` when similar scripts already exist. This reduces version explosion,
+  duplicate work, and "which script is the real one?" confusion.
+- **Keep session risk state across resumes**: if a session is interrupted and
+  resumed, high-impact work stays marked high-impact until it is closed out.
+- **Bring script ownership into the session**: when `scripts/MANIFEST.md`
+  exists, AGK copies it into the session scratch area so the agent sees
+  existing script purpose and do-not-duplicate notes early.
+- **Separate normal edits from high-impact operations**: ordinary source and
+  docs work can stay Git-first; database writes, service changes, deployments,
+  protected artifacts, backups, and cross-machine sync require stronger
+  evidence.
+- **Block common commit mistakes**: the Git pre-commit guard stops protected
+  artifacts, large runtime files, suspicious secrets, and project smoke-check
+  failures before they enter history.
+- **Make handoff explicit**: closeout helpers and the reusable skill give the
+  agent a small, repeatable way to summarize what changed, what was checked,
+  and what still needs human attention.
+
+## Why It Exists
+
 This is for AI coders who do not come from a coding background. A simple test:
 if you already know what it means to "Git-ify" your code, you probably do not
 need this. If you do not, then you are who I had in mind. I was that person.
@@ -19,7 +51,7 @@ wrong files, or losing the thread halfway through an idea.
 
 So I am sharing it in the hope that it helps you too. Wishing you all the best.
 
-*Everything above is the only part of this project written by a human.*
+*The personal note above is the only part of this project written by a human.*
 
 ## Overview
 
