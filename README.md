@@ -23,6 +23,8 @@ So I am sharing it in the hope that it helps you too. Wishing you all the best.
 
 *The personal note above is the only part of this project written by a human.*
 
+---
+
 AIcoding Governance Kit helps AI coding agents stop creating accidental chaos:
 duplicate scripts, stale versions, unclear handoffs, risky file changes, and
 unexplained production-impacting work.
